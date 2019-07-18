@@ -27,8 +27,8 @@
 #include <my_robotic_arm/GetUpperarmOrientation.h>
 #include <my_robotic_arm/GetLowerarmOrientation.h>
 #include <geometry_msgs/Vector3.h>
-#include <Adafruit_MMA8451.h>
-#include <Adafruit_Sensor.h>
+//#include <Adafruit_MMA8451.h>
+//#include <Adafruit_Sensor.h>
 
 //states
 enum {UNPOWERED, HOLDING_POSITION, MOVING, FINAL_APPROACH, CW_ENDSTOP_ACTIVATED, CCW_ENDSTOP_ACTIVATED, CALIBRATING } running_state;
@@ -122,10 +122,10 @@ const int CW_ENDSTOP_PIN = 2;  //pin # corrected 12/6/17
 const int CCW_ENDSTOP_PIN = 3; //pin # corrected 12/6/17
 
 //encoder pins
-const int ENCODER_1_PIN_A = 18;
-const int ENCODER_1_PIN_B = 19;
-const int ENCODER_2_PIN_A = 16; //was pin 20 pre-June2019, changed to use I2C on pins 20/21 for 3-Axis accelerometer orientation
-const int ENCODER_2_PIN_B = 17; //was pin 21 pre-June2019, changed to use I2C on pins 20/21 for 3-Axis accelerometer orientation
+const int ENCODER_1_PIN_A = 20;
+const int ENCODER_1_PIN_B = 21;
+const int ENCODER_2_PIN_A = 18; //was pin 20 pre-June2019, changed to use I2C on pins 20/21 for 3-Axis accelerometer orientation
+const int ENCODER_2_PIN_B = 19; //was pin 21 pre-June2019, changed to use I2C on pins 20/21 for 3-Axis accelerometer orientation
 
 //stepper pins
 const int STEP_PIN = A0;
@@ -157,108 +157,108 @@ ros::NodeHandle_<ArduinoHardware, 2, 6, 512, 2560> nh;    //increased 04July2019
 static volatile unsigned long next_update = 0L;//used to time loop updates
 static const unsigned long UPDATE_INTERVAL = 500L;//was 500L before 7/4/19, in milliseconds, 500 is 2Hz, 50 is 20Hz, 10 is 100Hz
 
-//service call backs
-void getUpperarmOrientationCallback(const my_robotic_arm::GetUpperarmOrientation::Request  &req, my_robotic_arm::GetUpperarmOrientation::Response &res){  
-  nh.loginfo("entering getOrientationCallback");
-  nh.spinOnce();
-  
-  Adafruit_MMA8451 mma = Adafruit_MMA8451();//defined here within function so it goes out of scope and stops at end of function
-
-  float _X = 0.0;
-  float _Y = 0.0;
-  float _Z = 0.0;
-  int num_points_to_smooth = 200; //was 200 pre-04Jul19
-  
-  //loop to start up MMA8451
-  unsigned long _MMA8451_start_time = millis();
-  unsigned long _MMA8451_end_time = _MMA8451_start_time + 3000L;
-  if (! mma.begin()) {
-    if ( millis() > _MMA8451_end_time ){
-      nh.loginfo("unable to start MMA8451");
-    }
-  }
-  
-  //init MMA8451
-  mma.setRange(MMA8451_RANGE_2_G);
-
-  //loop to read and smooth data
-  for (int i=0; i<num_points_to_smooth; i++){
-    //Get a new MMA8451 sensor event to read MMA8451
-    sensors_event_t event; 
-    mma.getEvent(&event);
-
-    //add porportion of new reading to previous cum
-    _X += event.acceleration.x / num_points_to_smooth; //note a float divided by and int should result in a float
-    _Y += event.acceleration.y / num_points_to_smooth; //note a float divided by and int should result in a float
-    _Z += event.acceleration.z / num_points_to_smooth; //note a float divided by and int should result in a float
-
-    nh.spinOnce();
-  }//end loop to read and smooth data
-
-  //put event readings in response res
-  res.upperarm_orientation.x = _X;
-  res.upperarm_orientation.y = _Y;
-  res.upperarm_orientation.z = _Z;
-
-  nh.spinOnce();
-
-  nh.loginfo("exiting getOrientationCallback");
-  nh.spinOnce();
-
-}// end getUpperarmOrientationCallback()
-
-//service call backs
-void getLowerarmOrientationCallback(const my_robotic_arm::GetLowerarmOrientation::Request  &req, my_robotic_arm::GetLowerarmOrientation::Response &res){  
-  nh.loginfo("entering getOrientationCallback");
-  nh.spinOnce();
-
-  Adafruit_MMA8451 mma = Adafruit_MMA8451();//defined here within function so it goes out of scope and stops at end of function
-
-  float _X = 0.0;
-  float _Y = 0.0;
-  float _Z = 0.0;
-  int num_points_to_smooth = 200;
-  
-  //loop to start up MMA8451
-  unsigned long _MMA8451_start_time = millis();
-  unsigned long _MMA8451_end_time = _MMA8451_start_time + 3000L;
-  if (! mma.begin()) {
-    if ( millis() > _MMA8451_end_time ){
-      nh.loginfo("unable to start MMA8451");
-    }
-  }
-  
-  //init MMA8451
-  mma.setRange(MMA8451_RANGE_2_G);
-
-  //loop to read and smooth data
-  for (int i=0; i<num_points_to_smooth; i++){
-    //Get a new MMA8451 sensor event to read MMA8451
-    sensors_event_t event; 
-    mma.getEvent(&event);
-
-    //add porportion of new reading to previous cum
+////service call backs
+//void getUpperarmOrientationCallback(const my_robotic_arm::GetUpperarmOrientation::Request  &req, my_robotic_arm::GetUpperarmOrientation::Response &res){  
+//  nh.loginfo("entering getOrientationCallback");
+//  nh.spinOnce();
+//  
+//  Adafruit_MMA8451 mma = Adafruit_MMA8451();//defined here within function so it goes out of scope and stops at end of function
+//
+//  float _X = 0.0;
+//  float _Y = 0.0;
+//  float _Z = 0.0;
+//  int num_points_to_smooth = 200; //was 200 pre-04Jul19
+//  
+//  //loop to start up MMA8451
+//  unsigned long _MMA8451_start_time = millis();
+//  unsigned long _MMA8451_end_time = _MMA8451_start_time + 3000L;
+//  if (! mma.begin()) {
+//    if ( millis() > _MMA8451_end_time ){
+//      nh.loginfo("unable to start MMA8451");
+//    }
+//  }
+//  
+//  //init MMA8451
+//  mma.setRange(MMA8451_RANGE_2_G);
+//
+//  //loop to read and smooth data
+//  for (int i=0; i<num_points_to_smooth; i++){
+//    //Get a new MMA8451 sensor event to read MMA8451
+//    sensors_event_t event; 
+//    mma.getEvent(&event);
+//
+//    //add porportion of new reading to previous cum
 //    _X += event.acceleration.x / num_points_to_smooth; //note a float divided by and int should result in a float
 //    _Y += event.acceleration.y / num_points_to_smooth; //note a float divided by and int should result in a float
 //    _Z += event.acceleration.z / num_points_to_smooth; //note a float divided by and int should result in a float
-    _X += event.acceleration.x / 200.0; //note a float divided by and int should result in a float
-    _Y += event.acceleration.y / 200.0; //note a float divided by and int should result in a float
-    _Z += event.acceleration.z / 200.0; //note a float divided by and int should result in a float
-
-    nh.spinOnce();
-  }//end loop to read and smooth data
-
-  //put event readings in response res
-  res.lowerarm_orientation.x = _X;
-  res.lowerarm_orientation.y = _Y;
-  res.lowerarm_orientation.z = _Z;  
-
-  nh.spinOnce();
-
-  nh.loginfo("exiting getOrientationCallback");
-  nh.spinOnce();
-     
-}// end getLowerarmOrientationCallback()
+//
+//    nh.spinOnce();
+//  }//end loop to read and smooth data
+//
+//  //put event readings in response res
+//  res.upperarm_orientation.x = _X;
+//  res.upperarm_orientation.y = _Y;
+//  res.upperarm_orientation.z = _Z;
+//
+//  nh.spinOnce();
+//
+//  nh.loginfo("exiting getOrientationCallback");
+//  nh.spinOnce();
+//
+//}// end getUpperarmOrientationCallback()
+//
+////service call backs
+//void getLowerarmOrientationCallback(const my_robotic_arm::GetLowerarmOrientation::Request  &req, my_robotic_arm::GetLowerarmOrientation::Response &res){  
+//  nh.loginfo("entering getOrientationCallback");
+//  nh.spinOnce();
+//
+//  Adafruit_MMA8451 mma = Adafruit_MMA8451();//defined here within function so it goes out of scope and stops at end of function
+//
+//  float _X = 0.0;
+//  float _Y = 0.0;
+//  float _Z = 0.0;
+//  int num_points_to_smooth = 200;
+//  
+//  //loop to start up MMA8451
+//  unsigned long _MMA8451_start_time = millis();
+//  unsigned long _MMA8451_end_time = _MMA8451_start_time + 3000L;
+//  if (! mma.begin()) {
+//    if ( millis() > _MMA8451_end_time ){
+//      nh.loginfo("unable to start MMA8451");
+//    }
+//  }
+//  
+//  //init MMA8451
+//  mma.setRange(MMA8451_RANGE_2_G);
+//
+//  //loop to read and smooth data
+//  for (int i=0; i<num_points_to_smooth; i++){
+//    //Get a new MMA8451 sensor event to read MMA8451
+//    sensors_event_t event; 
+//    mma.getEvent(&event);
+//
+//    //add porportion of new reading to previous cum
+////    _X += event.acceleration.x / num_points_to_smooth; //note a float divided by and int should result in a float
+////    _Y += event.acceleration.y / num_points_to_smooth; //note a float divided by and int should result in a float
+////    _Z += event.acceleration.z / num_points_to_smooth; //note a float divided by and int should result in a float
+//    _X += event.acceleration.x / 200.0; //note a float divided by and int should result in a float
+//    _Y += event.acceleration.y / 200.0; //note a float divided by and int should result in a float
+//    _Z += event.acceleration.z / 200.0; //note a float divided by and int should result in a float
+//
+//    nh.spinOnce();
+//  }//end loop to read and smooth data
+//
+//  //put event readings in response res
+//  res.lowerarm_orientation.x = _X;
+//  res.lowerarm_orientation.y = _Y;
+//  res.lowerarm_orientation.z = _Z;  
+//
+//  nh.spinOnce();
+//
+//  nh.loginfo("exiting getOrientationCallback");
+//  nh.spinOnce();
+//     
+//}// end getLowerarmOrientationCallback()
 
 //subscriber call backs
 void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_command_msg_) {
@@ -921,8 +921,8 @@ void setup() {
       encoder_direction_reversed = UR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = UR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(UR_minion_state_pub);
-      ros::ServiceServer<my_robotic_arm::GetUpperarmOrientation::Request, my_robotic_arm::GetUpperarmOrientation::Response> get_upperarm_orientation_service("get_upperarm_orientation_service",&getUpperarmOrientationCallback);
-      nh.advertiseService(get_upperarm_orientation_service);
+//      ros::ServiceServer<my_robotic_arm::GetUpperarmOrientation::Request, my_robotic_arm::GetUpperarmOrientation::Response> get_upperarm_orientation_service("get_upperarm_orientation_service",&getUpperarmOrientationCallback);
+//      nh.advertiseService(get_upperarm_orientation_service);
       nh.loginfo("SetupUR");
   }
   else if (minion_ident == EL_IDENT) {
@@ -943,8 +943,8 @@ void setup() {
       encoder_direction_reversed = LR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = LR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(LR_minion_state_pub);
-      ros::ServiceServer<my_robotic_arm::GetLowerarmOrientation::Request, my_robotic_arm::GetLowerarmOrientation::Response> get_lowerarm_orientation_service("get_lowerarm_orientation_service",&getLowerarmOrientationCallback);
-      nh.advertiseService(get_lowerarm_orientation_service);
+//      ros::ServiceServer<my_robotic_arm::GetLowerarmOrientation::Request, my_robotic_arm::GetLowerarmOrientation::Response> get_lowerarm_orientation_service("get_lowerarm_orientation_service",&getLowerarmOrientationCallback);
+//      nh.advertiseService(get_lowerarm_orientation_service);
       nh.loginfo("SetupLR");
       nh.spinOnce();
   }
