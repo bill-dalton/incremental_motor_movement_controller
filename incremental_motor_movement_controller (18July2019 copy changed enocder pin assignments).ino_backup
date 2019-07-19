@@ -59,15 +59,15 @@ static char inbound_message[40];
 static volatile long encoder_1_pos = 0;  //position of doe in encoder clicks
 static volatile long encoder_2_pos = 0;  //position of stepper doe in encoder clicks
 static volatile long stepper_counts = 0; //stepper position in stepper steps
-//static volatile bool encoder_direction_reversed = false;
+static volatile bool encoder_direction_reversed = false;
 static volatile bool stepper_direction_reversed = false;
 
 //robot configuration constants
-//const bool BR_ENCODER_DIRECTION_REVERSED = false;
-//const bool SL_ENCODER_DIRECTION_REVERSED = false;
-//const bool UR_ENCODER_DIRECTION_REVERSED = false;
-//const bool EL_ENCODER_DIRECTION_REVERSED = false;
-//const bool LR_ENCODER_DIRECTION_REVERSED = false;
+const bool BR_ENCODER_DIRECTION_REVERSED = false;
+const bool SL_ENCODER_DIRECTION_REVERSED = false;
+const bool UR_ENCODER_DIRECTION_REVERSED = false;
+const bool EL_ENCODER_DIRECTION_REVERSED = false;
+const bool LR_ENCODER_DIRECTION_REVERSED = false;
 const bool BR_STEPPER_DIRECTION_REVERSED = true;
 const bool SL_STEPPER_DIRECTION_REVERSED = true;
 const bool UR_STEPPER_DIRECTION_REVERSED = false;
@@ -75,13 +75,13 @@ const bool EL_STEPPER_DIRECTION_REVERSED = false;
 const bool LR_STEPPER_DIRECTION_REVERSED = true;
 
 //motion constants
-static const float BR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.030000000; //July 2019 Encoder at joint  60:12 gears with 600ppr_quad/2400counts/rev
-static const float SL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.053773585; //July 2019 Encoder at joint 106:38 gears with 600ppr_quad/2400counts/rev
-static const float UR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.050000000; //July 2019 Encoder at joint  87:29 gears with 600ppr_quad/2400counts/rev
-static const float EL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.058878505; //July 2019 Encoder at joint 107:42 gears with 600ppr_quad/2400counts/rev
-static const float LR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.057142857; //July 2019 Encoder at joint  84:32 gears with 600ppr_quad/2400counts/rev
-//static const float WL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.010141226; //July 2019 Encoder at joint  65:15 gears with 2048ppr_quad/8196counts/rev
-//static const float WR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.010986328; //July 2019 Encoder at joint  64:16 gears with 2048ppr_quad/8196counts/rev
+static const float BR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.03000; //June 2019
+static const float SL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.01408; //0.01284=360/1440/17.754=360/SL_JOINT_ENCODER_PPR/SL_JOINT_ENCODER_GEAR_RATIO
+static const float UR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.01808; //0.01284=360/1440/13.825
+static const float EL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.005698; //0.01284=360/1440/43.8749
+static const float LR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.057143; //0.057143=360/(600*4)/2.625 June 2019 configuration
+//static const float WL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.010141226; //xl430, not stepper
+//static const float WR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.010986328; //xl430, not stepper
 
 static const float BR_SE_DEGREES_PER_ENCODER_COUNT = 0.0; //July 2019 - not installed
 static const float SL_SE_DEGREES_PER_ENCODER_COUNT = 0.014081124; //July 2019
@@ -340,20 +340,14 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
   required_duration = commanded_incremental_movement_[1];
   commanded_incremental_movement = commanded_incremental_movement_[joint_index];
 
-  //check for Command 400 to set joint position variables
+  //check for Command 400 to set joint position  values to zero
   if (commanded_incremental_movement > 200.0 && commanded_incremental_movement < 600.0) {
     //Command 400 - set joint position values to zero
     float new_joint_pos_;
     new_joint_pos_ = commanded_incremental_movement - 400.0;
     
-    if (minion_ident == LR_IDENT){
-      //special cse July2019 for LR wiring which retains 3D accelerometer on I2C pins 20&21
-      encoder_2_pos = (long) (new_joint_pos_ / joint_degrees_per_encoder_count);
-    }
-    else {
-      encoder_1_pos = (long) (new_joint_pos_ / joint_degrees_per_encoder_count);
-    }
-    
+    encoder_1_pos = (long) (new_joint_pos_ / joint_degrees_per_encoder_count);
+    encoder_2_pos = (long) (new_joint_pos_ / joint_degrees_per_encoder_count);
     current_pos = new_joint_pos_;
     
     steps_remaining = 0;
@@ -361,44 +355,17 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
     new_plan = false;
 
     //log
-    nh.loginfo("cmd 400: reset joint position variables");
+    nh.loginfo("cmd 400: reset joint position vars to zero");
 
     //exit without beginning any movement
     return;
   }// end of command 400
 
-  //check for Command 800 to set SE position variables
+  //check for Command 800 to set stepper postion values to zero
   if (commanded_incremental_movement > 600.0 && commanded_incremental_movement < 1000.0) {
-    //Command 800 - set SE position values to zero
-    float new_SE_pos_;
-    new_SE_pos_ = commanded_incremental_movement - 800.0;
-    
-    if (minion_ident == LR_IDENT){
-      //normally not used - no action taken as LR does not have SE encoder installed as of July 2019
-    }
-    else if (minion_ident == BR_IDENT){
-      //normally not used - no action taken as BR does not have SE encoder installed as of July 2019
-    }
-    else {
-      encoder_2_pos = (long) (new_SE_pos_ / SE_degrees_per_encoder_count);
-    }
-    
-    steps_remaining = 0;
-    commanded_incremental_movement = 0.0;
-    new_plan = false;
-
-    //log
-    nh.loginfo("cmd 800: reset SE position variables");
-
-    //exit without beginning any movement
-    return;
-  }// end of command 800
- 
-  //check for Command 1200 to set stepper position variables
-  if (commanded_incremental_movement > 1000.0 && commanded_incremental_movement < 1400.0) {
-    //Command 1200 - set stepper position values to zero
+    //Command 800 - set stepper postion values to zero
     float new_stepper_pos_;
-    new_stepper_pos_ = commanded_incremental_movement - 1200.0;
+    new_stepper_pos_ = commanded_incremental_movement - 800.0;
     
     stepper_counts = (long) (new_stepper_pos_ / degrees_per_microstep);
     
@@ -407,11 +374,11 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
     new_plan = false;
 
     //log
-    nh.loginfo("cmd 1200: reset stepper position variables");
+    nh.loginfo("cmd 800: reset stepper postion vars to zero");
 
     //exit without beginning any movement
     return;
-  }// end of command 1200
+  }// end of command 800
   
   //debug loginfo required_duration
   char result5[8]; // Buffer big enough for 7-character float
@@ -827,22 +794,13 @@ void readSensors() {
   if (torque_state == RED) strcat(states_msg, red_torque_msg);
 
   //populate MinionState message
-  if (minion_ident == LR_IDENT){
-    //special case 19July19 for 3d accelerometer still wired to pins 20&21 I2C. LR has no SE encoder installed.
-    minion_state.joint_position = ((float) encoder_2_pos) * joint_degrees_per_encoder_count;   
-    minion_state.SE_position = minion_state.joint_position;
-   }
-  else if (minion_ident == BR_IDENT){
-    //special case 19July19 for BR. BR has no separate SE encoder so joint_position is used instead
-    minion_state.joint_position = ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
-    minion_state.SE_position = minion_state.joint_position;
+  if (encoder_direction_reversed == true){
+    minion_state.joint_position = -1.0 * ((float) encoder_1_pos) * joint_degrees_per_encoder_count;//TO DO change this to true joint encoder after joint encoder actually installed
   }
   else {
-    //normal case for all other joints
-    minion_state.joint_position = ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
-    minion_state.SE_position = ((float) encoder_2_pos) * SE_degrees_per_encoder_count;
+    minion_state.joint_position = ((float) encoder_1_pos) * joint_degrees_per_encoder_count;//TO DO change this to true joint encoder after joint encoder actually installed    
   }
-
+  minion_state.SE_position =  ((float) encoder_2_pos) * SE_degrees_per_encoder_count;
   minion_state.motor_position = ((float) stepper_counts) * degrees_per_microstep;
   //minion_state.motor_velocity = //this is populated in executeIncrementalMovement()
   minion_state.motor_acceleration = 0.0099; //this can be added later
@@ -940,7 +898,7 @@ void setup() {
       joint_degrees_per_encoder_count = BR_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = BR_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = BR_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = BR_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = BR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = BR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(BR_minion_state_pub);
       nh.loginfo("SetupBR");
@@ -950,7 +908,7 @@ void setup() {
       joint_degrees_per_encoder_count = SL_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = SL_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = SL_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = SL_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = SL_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = SL_STEPPER_DIRECTION_REVERSED;
       nh.advertise(SL_minion_state_pub);
       nh.loginfo("SetupSL");
@@ -960,7 +918,7 @@ void setup() {
       joint_degrees_per_encoder_count = UR_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = UR_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = UR_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = UR_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = UR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = UR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(UR_minion_state_pub);
 //      ros::ServiceServer<my_robotic_arm::GetUpperarmOrientation::Request, my_robotic_arm::GetUpperarmOrientation::Response> get_upperarm_orientation_service("get_upperarm_orientation_service",&getUpperarmOrientationCallback);
@@ -972,7 +930,7 @@ void setup() {
       joint_degrees_per_encoder_count = EL_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = EL_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = EL_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = EL_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = EL_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = EL_STEPPER_DIRECTION_REVERSED;
       nh.advertise(EL_minion_state_pub);
       nh.loginfo("SetupEL");    
@@ -982,7 +940,7 @@ void setup() {
       joint_degrees_per_encoder_count = LR_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = LR_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = LR_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = LR_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = LR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = LR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(LR_minion_state_pub);
 //      ros::ServiceServer<my_robotic_arm::GetLowerarmOrientation::Request, my_robotic_arm::GetLowerarmOrientation::Response> get_lowerarm_orientation_service("get_lowerarm_orientation_service",&getLowerarmOrientationCallback);
