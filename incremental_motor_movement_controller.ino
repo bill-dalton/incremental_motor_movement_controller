@@ -340,11 +340,11 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
   required_duration = commanded_incremental_movement_[1];
   commanded_incremental_movement = commanded_incremental_movement_[joint_index];
 
-  //check for Command 400 to set joint position variables
-  if (commanded_incremental_movement > 200.0 && commanded_incremental_movement < 600.0) {
-    //Command 400 - set joint position values to zero
+  //check for Command 1000 to set joint position variables
+  if (commanded_incremental_movement > 500.0 && commanded_incremental_movement < 1500.0) {
+    //Command 1000 - set joint position values to zero
     float new_joint_pos_;
-    new_joint_pos_ = commanded_incremental_movement - 400.0;
+    new_joint_pos_ = commanded_incremental_movement - 1000.0;
     
     if (minion_ident == LR_IDENT){
       //special cse July2019 for LR wiring which retains 3D accelerometer on I2C pins 20&21
@@ -361,17 +361,17 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
     new_plan = false;
 
     //log
-    nh.loginfo("cmd 400: reset joint position variables");
+    nh.loginfo("cmd 1000: reset joint position variables");
 
     //exit without beginning any movement
     return;
-  }// end of command 400
+  }// end of command 1000
 
-  //check for Command 800 to set SE position variables
-  if (commanded_incremental_movement > 600.0 && commanded_incremental_movement < 1000.0) {
-    //Command 800 - set SE position values to zero
+  //check for Command 2000 to set SE position variables
+  if (commanded_incremental_movement > 1500.0 && commanded_incremental_movement < 2500.0) {
+    //Command 2000 - set SE position values to zero
     float new_SE_pos_;
-    new_SE_pos_ = commanded_incremental_movement - 800.0;
+    new_SE_pos_ = commanded_incremental_movement - 2000.0;
     
     if (minion_ident == LR_IDENT){
       //normally not used - no action taken as LR does not have SE encoder installed as of July 2019
@@ -388,17 +388,17 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
     new_plan = false;
 
     //log
-    nh.loginfo("cmd 800: reset SE position variables");
+    nh.loginfo("cmd 2000: reset SE position variables");
 
     //exit without beginning any movement
     return;
-  }// end of command 800
+  }// end of command 2000
  
-  //check for Command 1200 to set stepper position variables
-  if (commanded_incremental_movement > 1000.0 && commanded_incremental_movement < 1400.0) {
-    //Command 1200 - set stepper position values to zero
+  //check for Command 3000 to set stepper position variables
+  if (commanded_incremental_movement > 2500.0 && commanded_incremental_movement < 3500.0) {
+    //Command 3000 - set stepper position values to zero
     float new_stepper_pos_;
-    new_stepper_pos_ = commanded_incremental_movement - 1200.0;
+    new_stepper_pos_ = commanded_incremental_movement - 3000.0;
     
     stepper_counts = (long) (new_stepper_pos_ / degrees_per_microstep);
     
@@ -407,11 +407,11 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
     new_plan = false;
 
     //log
-    nh.loginfo("cmd 1200: reset stepper position variables");
+    nh.loginfo("cmd 3000: reset stepper position variables");
 
     //exit without beginning any movement
     return;
-  }// end of command 1200
+  }// end of command 3000
   
   //debug loginfo required_duration
   char result5[8]; // Buffer big enough for 7-character float
