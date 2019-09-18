@@ -13,13 +13,7 @@
  *    Moves motor to goal using RAMP algorithm
  * To Do:
  *    convert running_state and torque_state into an integer concept to publish as int minion_state.operating_state
- * Modification to be non-blocking
- *    removed RAMP stuff
- *    added Timer1
- * Timers:
- *    Timer1 - fires to change stepper interval
- *    Timer3 - fires to pulse stepper
- *    millis() - used to periodically publish position and state info
+ *    
  */
 
 #include <ros.h>
@@ -113,22 +107,9 @@ static volatile bool  direction_CW = true;              //movement in positive j
 static volatile float current_pos = 0.0;                //joint position in degrees
 static volatile float pos_error = 0.0;                  //difference in degrees between joint commanded_stepper_position and joint current position
 static volatile long  steps_remaining = 0;              //stepper steps remaining to move. uses in final_approach and holding_position
-static volatile long  steps_to_move = 0;                //for non-blocking motion algorithm
 static volatile float joint_degrees_per_encoder_count;  //reset to particular joint in setup()
 static volatile float SE_degrees_per_encoder_count;     //reset to particular joint in setup()
 static volatile float degrees_per_microstep;            //reset to particular joint in setup()
-static volatile long  peak_microsteps_per_second;       //for non-blocking motion algorithm
-static volatile long  current_microsteps_per_second=0L; //for non-blocking motion algorithm
-static volatile long  current_microstep_period=0L;      //in microseconds, for non-blocking motion algorithm
-static volatile unsigned long required_duration_until_peak_in_milliseconds = 0L;//in milliseconds, for non-blocking motion algorithm
-static volatile unsigned long movement_start_time;       //from millis() for non-blocking motion algorithm
-static volatile unsigned long movement_end_time;         //from millis() for non-blocking motion algorithm. used to assure movement stops
-
-//loop timing variables
-static volatile unsigned long next_publish_update     = 0L;   //used to time loop publish updates
-static const unsigned long    PUBLISH_UPDATE_INTERVAL = 500L; //was 500L before 7/4/19, in milliseconds, 500 is 2Hz, 50 is 20Hz, 10 is 100Hz
-static volatile unsigned long next_rate_update        = 0L;   //used to time loop publish updates
-static const unsigned long    RATE_UPDATE_INTERVAL    = 100L; //in milliseconds, 500 is 2Hz, 50 is 20Hz, 100 is 10Hz
 
 //variables to be published
 my_robotic_arm::MinionState minion_state;
@@ -172,7 +153,11 @@ const int EE2_IDENT = 6;
 //ROS node handler
 ros::NodeHandle_<ArduinoHardware, 2, 6, 512, 2560> nh;    //increased 04July2019
 
-/* service call backs - currently unused
+//loop timing variables
+static volatile unsigned long next_update = 0L;//used to time loop updates
+static const unsigned long UPDATE_INTERVAL = 500L;//was 500L before 7/4/19, in milliseconds, 500 is 2Hz, 50 is 20Hz, 10 is 100Hz
+
+////service call backs
 //void getUpperarmOrientationCallback(const my_robotic_arm::GetUpperarmOrientation::Request  &req, my_robotic_arm::GetUpperarmOrientation::Response &res){  
 //  nh.loginfo("entering getOrientationCallback");
 //  nh.spinOnce();
@@ -274,7 +259,6 @@ ros::NodeHandle_<ArduinoHardware, 2, 6, 512, 2560> nh;    //increased 04July2019
 //  nh.spinOnce();
 //     
 //}// end getLowerarmOrientationCallback()
- */
 
 //subscriber call backs
 void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_command_msg_) {
@@ -695,107 +679,15 @@ long getPeakStepperVelocityNeeded(float the_required_total_duration_, float the_
   return peak_microsteps_per_second_;
 }// end getPeakStepperVelocityNeeded()
 
-void updateRate() {
-  /*  changes stepper velocity by updating rate of pulses
-   *  updates global variable current_microsteps_per_second to follow acceleration/deceleration curve
-   *  called by Timer1.attachInterrupt(updateRate) at an interval of RATE_UPDATE_INTERVAL
-   *  assumes a constant interval bewteen rate updates which is specified by RATE_UPDATE_INTERVAL
-   *  Turns interrupts off then back on again per this: https://www.pjrc.com/teensy/td_libs_TimerOne.html
-   */
-  
-
-
-  
-}
-
-//NON-BLOCKING VERSION
 void executeIncrementalMovement(float the_required_total_duration_, float the_commanded_incremental_movement_) {
   /* Result: pulses stepper a precise number of times to acheive commanded degrees of movement at joint
-   * Note: This is the NON-BLOCKING method. ros pub stuff WILL operate while movement loop is in progress
-   * Does NOT use Arduino RAMP library
-   * Called by:
-   *  if (new_plan) in loop()
+   * Note: This is a blocking method. ros pub stuff will not operate while movement loop is in progress
    * Inputs:
    *  the_required_total_duration_ :: duration of complete movement in seconds
    *  the_commanded_incremental_movement_ :: commanded joint movement in degrees
-   * Actions:
-   *  calculates and sets global parameters
-   *  restarts Timer1 and Timer3
-   *  sets a millis() stop time to be monitored in loop() to stop timers and steppers
    * Note:
    *  For legacy reasons, the_required_total_duration_ is in float seconds, while rampLong myRamp' needs duration as milliseconds as an unsigned long  
    */
-  nh.loginfo("entering executeIncrementalMovement() - non-blocking version");
-  nh.spinOnce();
-
-  //get steps to move and steps remaining
-  steps_to_move = (long) abs(the_commanded_incremental_movement_ / degrees_per_microstep); //joint distance to travel in steps in absolute value as long - convert dtg_ in degrees to dtg_stepper_counts_ as a long
-  steps_remaining = steps_to_move;
-  
-  //get peak_microsteps_per_second
-  peak_microsteps_per_second = getPeakStepperVelocityNeeded(the_required_total_duration_, the_commanded_incremental_movement_);
-
-  //initialize stepper velocity to zero
-  current_microsteps_per_second = 0;
-  current_microstep_period = 5000000; //set a 5 second period just to get things started
-
-  //convert required duration in float seconds to required_duration_until_peak_in_milliseconds_ in unsigned long. Notice this is only half the total duration as velocity ramps up to peak then down to zero
-  required_duration_until_peak_in_milliseconds = (unsigned long) abs(the_required_total_duration_ * 1000.0 / 2.0);
-
-  //get direction of motion. positive distance defined as CCW, negative as CW
-  if (the_commanded_incremental_movement_ > 0) {
-      direction_CW = true;
-//      nh.loginfo("in executeIncrementalMovement(), dir is CW");
-//      nh.spinOnce();
-      if (stepper_direction_reversed == true){
-          digitalWrite(DIR_PIN, HIGH);
-          digitalWrite(DIR2_PIN, LOW);
-      }
-      else{
-          //this is reversed stepper direction
-          digitalWrite(DIR_PIN, LOW);
-          digitalWrite(DIR2_PIN, HIGH);        
-      }
-  } 
-  else {
-      direction_CW = false;
-//      nh.loginfo("in executeIncrementalMovement(), dir is CCW");
-//      nh.spinOnce();
-      if (stepper_direction_reversed == true){
-          digitalWrite(DIR_PIN, LOW);      
-          digitalWrite(DIR2_PIN, HIGH);
-      }
-      else {
-          //this is reversed stepper direction
-          digitalWrite(DIR_PIN, HIGH);      
-          digitalWrite(DIR2_PIN, LOW);
-      }
-  }
-
-  //restart Timer1 and Timer3
-  Timer3.setPeriod(current_microstep_period);
-  Timer1.restart();
-  Timer3.restart();
-
-  movement_start_time = millis();
-  movement_end_time = movement_start_time + 1000L + (long) 2 * the_required_total_duration_ * 1000L; //ends after duration plus 1 second (1000 milliseconds)
-
-  
-
-}// end executeIncrementalMovement() - NON-BLOCKING version
-
-/*BLOCKING VERSION
-void executeIncrementalMovement(float the_required_total_duration_, float the_commanded_incremental_movement_) {
-  // Result: pulses stepper a precise number of times to acheive commanded degrees of movement at joint
-  // Note: This is a blocking method. ros pub stuff will not operate while movement loop is in progress
-  // Called by:
-  //  if (new_plan) in loop()
-  // Inputs:
-  //  the_required_total_duration_ :: duration of complete movement in seconds
-  //  the_commanded_incremental_movement_ :: commanded joint movement in degrees
-  // Note:
-  //  For legacy reasons, the_required_total_duration_ is in float seconds, while rampLong myRamp' needs duration as milliseconds as an unsigned long  
-  //
   nh.loginfo("entering executeIncrementalMovement()");
   nh.spinOnce();
 
@@ -806,7 +698,6 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
   long current_microstep_period_ = 0L;  //period in microseconds
   unsigned long required_duration_until_peak_in_milliseconds_ = 0L;
 
-  //get steps to move
   steps_remaining = (long) abs(the_commanded_incremental_movement_ / degrees_per_microstep); //joint distance to travel in steps in absolute value as long - convert dtg_ in degrees to dtg_stepper_counts_ as a long
 
   //get peak_microsteps_per_second_
@@ -919,8 +810,7 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
   nh.loginfo("exiting executeIncrementalMovement(), 105");
   nh.spinOnce();
 
-}// end executeIncrementalMovement() - blocking version
-*/
+}// end executeIncrementalMovement()
 
 void readSensors() {
   //report state
@@ -1156,13 +1046,13 @@ void loop() {
  }//end if new_plan
 
   //log updates
-  if (millis() > next_publish_update) {
+  if (millis() > next_update) {
     readSensors();
     publishAll();
     //    noInterrupts();
-    next_publish_update = millis() + PUBLISH_UPDATE_INTERVAL;
+    next_update = millis() + UPDATE_INTERVAL;
     //    interrupts();
-  }//end if next_publish_update
+  }//end if next_update
 
   nh.spinOnce();
 }// end loop()
