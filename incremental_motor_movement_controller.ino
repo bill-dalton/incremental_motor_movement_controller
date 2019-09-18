@@ -119,6 +119,7 @@ static volatile float SE_degrees_per_encoder_count;     //reset to particular jo
 static volatile float degrees_per_microstep;            //reset to particular joint in setup()
 static volatile long  peak_microsteps_per_second;       //for non-blocking motion algorithm
 static volatile long  current_microsteps_per_second=0L; //for non-blocking motion algorithm
+static volatile long  change_in_microsteps_per_second_each_rate_update;  //change occuring in one RATE_UPDATE_INTERVAL
 static volatile long  current_microstep_period=0L;      //in microseconds, for non-blocking motion algorithm
 static volatile unsigned long required_duration_until_peak_in_milliseconds = 0L;//in milliseconds, for non-blocking motion algorithm
 static volatile unsigned long movement_start_time;       //from millis() for non-blocking motion algorithm
@@ -129,6 +130,7 @@ static volatile unsigned long next_publish_update     = 0L;   //used to time loo
 static const unsigned long    PUBLISH_UPDATE_INTERVAL = 500L; //was 500L before 7/4/19, in milliseconds, 500 is 2Hz, 50 is 20Hz, 10 is 100Hz
 static volatile unsigned long next_rate_update        = 0L;   //used to time loop publish updates
 static const unsigned long    RATE_UPDATE_INTERVAL    = 100L; //in milliseconds, 500 is 2Hz, 50 is 20Hz, 100 is 10Hz
+static volatile unsigned long time_now;                       //used to store value from millis()
 
 //variables to be published
 my_robotic_arm::MinionState minion_state;
@@ -702,9 +704,39 @@ void updateRate() {
    *  assumes a constant interval bewteen rate updates which is specified by RATE_UPDATE_INTERVAL
    *  Turns interrupts off then back on again per this: https://www.pjrc.com/teensy/td_libs_TimerOne.html
    */
-  
+  long copy_steps_to_move;
+  long copy_steps_remaining;
+  long copy_current_microsteps_per_second;
+  long copy_current_microstep_period;
+  long copy_change_in_microsteps_per_second_each_rate_update;
 
+  //stop interrupts to make a quick copy of globals, then restart -  Ref: https://www.pjrc.com/teensy/td_libs_TimerOne.html
+  noInterrupts();
+  copy_steps_to_move = steps_to_move;
+  copy_steps_remaining = steps_remaining;
+  copy_current_microsteps_per_second = current_microsteps_per_second;
+  copy_change_in_microsteps_per_second_each_rate_update = change_in_microsteps_per_second_each_rate_update;
+  interrupts();
 
+  //calculate new stepper velocity
+  if (copy_steps_remaining > (copy_steps_to_move / 2)) {
+    //not yet at half way point - still accelerating
+    copy_current_microsteps_per_second += copy_change_in_microsteps_per_second_each_rate_update;
+  }
+  else {
+    //decelerating
+    copy_current_microsteps_per_second -= copy_change_in_microsteps_per_second_each_rate_update;    
+  }
+
+  //calculate the microstep period and set Timer3 to new rate
+  copy_current_microstep_period = 1000000L / copy_current_microsteps_per_second;  
+  Timer3.setPeriod(copy_current_microstep_period);
+
+  //stop interrupt to write new values to globals, then restart interrupts
+  noInterrupts();
+  current_microstep_period = copy_current_microstep_period;  //i don't think is used for anything outside this function?
+  current_microsteps_per_second = copy_current_microsteps_per_second; //this IS used
+  interrupts();
   
 }
 
@@ -742,6 +774,10 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
   //convert required duration in float seconds to required_duration_until_peak_in_milliseconds_ in unsigned long. Notice this is only half the total duration as velocity ramps up to peak then down to zero
   required_duration_until_peak_in_milliseconds = (unsigned long) abs(the_required_total_duration_ * 1000.0 / 2.0);
 
+  //calculate the rate of change in stepper velocity required in one RATE_UPDATE_INTERVAL
+  long num_rate_updates_to_peak = required_duration_until_peak_in_milliseconds / RATE_UPDATE_INTERVAL;
+  change_in_microsteps_per_second_each_rate_update = peak_microsteps_per_second / num_rate_updates_to_peak;
+   
   //get direction of motion. positive distance defined as CCW, negative as CW
   if (the_commanded_incremental_movement_ > 0) {
       direction_CW = true;
@@ -779,8 +815,6 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
 
   movement_start_time = millis();
   movement_end_time = movement_start_time + 1000L + (long) 2 * the_required_total_duration_ * 1000L; //ends after duration plus 1 second (1000 milliseconds)
-
-  
 
 }// end executeIncrementalMovement() - NON-BLOCKING version
 
@@ -1118,15 +1152,17 @@ void setup() {
   
   nh.spinOnce();
 
-  //setup timer
-  //  Timer7.attachInterrupt(stepOnce).setPeriod(0).start(); //delay(50);      //fires steppers at freqs specified in queue
-  //ref: https://playground.arduino.cc/Code/Timer3//
+  //setup timers - ref: https://www.pjrc.com/teensy/td_libs_TimerOne.html 
+  Timer1.initialize(RATE_UPDATE_INTERVAL);  //Timer1 fires to change i.e. update stepper velocity
+  Timer1.attachInterrupt(updateRate);
+  Timer1.start();
+  Timer1.stop();
+  Timer3.initialize(5000000);  //Timer1 fires to pulse stepper. just set to once every five seconds for now. will not matter becasue it will be turned off
+  Timer3.attachInterrupt(stepOnce);
+  Timer3.start();
+  Timer3.stop();
 
-  //Timer3 now setup in executeIncrementalMovement() 6/4/2019
-//  Timer3.initialize(5000000);  // initialize Timer3, and set a 1/2 second period
-//  Timer3.attachInterrupt(stepOnce);
-
-  nh.loginfo("incremental_motor_movement_controller V0.0.01 7/15/2019");
+  nh.loginfo("incremental_motor_movement_controller non-blocking version V0.0.02 9/18/2019");
   nh.spinOnce();
 }// end setup()
 
@@ -1145,24 +1181,27 @@ void loop() {
     running_state = MOVING;
 
     executeIncrementalMovement(required_duration, commanded_incremental_movement);
-//      nh.loginfo("finished if new_plan 1");
-//      nh.spinOnce();
     new_plan = false;
-//      nh.loginfo("finished if new_plan 2");
-//      nh.spinOnce();
-    running_state = HOLDING_POSITION;
-//      nh.loginfo("finished if new_plan 3");
-//      nh.spinOnce();
- }//end if new_plan
+    
+  }//end if new_plan
 
-  //log updates
-  if (millis() > next_publish_update) {
+  //log updates periodically
+  time_now = millis();
+  if (time_now > next_publish_update) {
     readSensors();
     publishAll();
-    //    noInterrupts();
-    next_publish_update = millis() + PUBLISH_UPDATE_INTERVAL;
-    //    interrupts();
+    next_publish_update = time_now + PUBLISH_UPDATE_INTERVAL;
   }//end if next_publish_update
+
+  //shutdown movement when time is up
+  if (running_state == MOVING) {
+    if (time_now > movement_end_time) {
+      //movement should be finished. stop stepper motions and Timers
+      Timer1.stop();
+      Timer3.stop();
+      running_state = HOLDING_POSITION;
+    }  
+  }
 
   nh.spinOnce();
 }// end loop()
