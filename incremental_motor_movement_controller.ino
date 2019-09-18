@@ -4,7 +4,7 @@
  *    BR, LR, WL & WR joints already has such encoders
  * Runs on:
  *    Teensy, Arduino driving stepper motors
- *    For Dynamixels on OpenCM, use old xl430_incremental_movement_controller
+ *    For Dynamixels on OpenCM, use xl430_incremental_motor_movement_controller
  * Subscribes to ROS Topics:
  *    commanded_incremental_motor_movement
  * Publishes to ROS Topics:   
@@ -53,21 +53,21 @@ volatile bool new_plan = false;
 
 //debug messages
 //static char miscMsgs[20];
-static char inbound_message[40];
+static char inbound_message[400];
 
 //internal position and direction variables
 static volatile long encoder_1_pos = 0;  //position of doe in encoder clicks
 static volatile long encoder_2_pos = 0;  //position of stepper doe in encoder clicks
 static volatile long stepper_counts = 0; //stepper position in stepper steps
-//static volatile bool encoder_direction_reversed = false;
+static volatile bool encoder_direction_reversed = false;
 static volatile bool stepper_direction_reversed = false;
 
 //robot configuration constants
-//const bool BR_ENCODER_DIRECTION_REVERSED = false;
-//const bool SL_ENCODER_DIRECTION_REVERSED = false;
-//const bool UR_ENCODER_DIRECTION_REVERSED = false;
-//const bool EL_ENCODER_DIRECTION_REVERSED = false;
-//const bool LR_ENCODER_DIRECTION_REVERSED = false;
+const bool BR_ENCODER_DIRECTION_REVERSED = false;
+const bool SL_ENCODER_DIRECTION_REVERSED = false;
+const bool UR_ENCODER_DIRECTION_REVERSED = true;
+const bool EL_ENCODER_DIRECTION_REVERSED = false;
+const bool LR_ENCODER_DIRECTION_REVERSED = false;
 const bool BR_STEPPER_DIRECTION_REVERSED = true;
 const bool SL_STEPPER_DIRECTION_REVERSED = true;
 const bool UR_STEPPER_DIRECTION_REVERSED = false;
@@ -829,17 +829,32 @@ void readSensors() {
   //populate MinionState message
   if (minion_ident == LR_IDENT){
     //special case 19July19 for 3d accelerometer still wired to pins 20&21 I2C. LR has no SE encoder installed.
-    minion_state.joint_position = ((float) encoder_2_pos) * joint_degrees_per_encoder_count;   
+    if (encoder_direction_reversed == true) {
+      minion_state.joint_position = -1.0 * ((float) encoder_2_pos) * joint_degrees_per_encoder_count;
+    }
+    else {
+      minion_state.joint_position = ((float) encoder_2_pos) * joint_degrees_per_encoder_count;
+    }         
     minion_state.SE_position = minion_state.joint_position;
    }
   else if (minion_ident == BR_IDENT){
     //special case 19July19 for BR. BR has no separate SE encoder so joint_position is used instead
-    minion_state.joint_position = ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
+    if (encoder_direction_reversed == true) {
+      minion_state.joint_position = -1.0 * ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
+    }
+    else {
+      minion_state.joint_position = ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
+    }
     minion_state.SE_position = minion_state.joint_position;
   }
   else {
     //normal case for all other joints
-    minion_state.joint_position = ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
+    if (encoder_direction_reversed == true) {
+      minion_state.joint_position = -1.0 * ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
+    }
+    else {
+      minion_state.joint_position = ((float) encoder_1_pos) * joint_degrees_per_encoder_count;
+    }
     minion_state.SE_position = ((float) encoder_2_pos) * SE_degrees_per_encoder_count;
   }
 
@@ -940,7 +955,7 @@ void setup() {
       joint_degrees_per_encoder_count = BR_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = BR_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = BR_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = BR_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = BR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = BR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(BR_minion_state_pub);
       nh.loginfo("SetupBR");
@@ -950,7 +965,7 @@ void setup() {
       joint_degrees_per_encoder_count = SL_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = SL_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = SL_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = SL_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = SL_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = SL_STEPPER_DIRECTION_REVERSED;
       nh.advertise(SL_minion_state_pub);
       nh.loginfo("SetupSL");
@@ -960,7 +975,7 @@ void setup() {
       joint_degrees_per_encoder_count = UR_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = UR_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = UR_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = UR_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = UR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = UR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(UR_minion_state_pub);
 //      ros::ServiceServer<my_robotic_arm::GetUpperarmOrientation::Request, my_robotic_arm::GetUpperarmOrientation::Response> get_upperarm_orientation_service("get_upperarm_orientation_service",&getUpperarmOrientationCallback);
@@ -972,7 +987,7 @@ void setup() {
       joint_degrees_per_encoder_count = EL_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = EL_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = EL_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = EL_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = EL_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = EL_STEPPER_DIRECTION_REVERSED;
       nh.advertise(EL_minion_state_pub);
       nh.loginfo("SetupEL");    
@@ -982,7 +997,7 @@ void setup() {
       joint_degrees_per_encoder_count = LR_JOINT_DEGREES_PER_ENCODER_COUNT;
       SE_degrees_per_encoder_count = LR_SE_DEGREES_PER_ENCODER_COUNT;
       degrees_per_microstep = LR_DEGREES_PER_MICROSTEP;
-      //encoder_direction_reversed = LR_ENCODER_DIRECTION_REVERSED;
+      encoder_direction_reversed = LR_ENCODER_DIRECTION_REVERSED;
       stepper_direction_reversed = LR_STEPPER_DIRECTION_REVERSED;
       nh.advertise(LR_minion_state_pub);
 //      ros::ServiceServer<my_robotic_arm::GetLowerarmOrientation::Request, my_robotic_arm::GetLowerarmOrientation::Response> get_lowerarm_orientation_service("get_lowerarm_orientation_service",&getLowerarmOrientationCallback);
