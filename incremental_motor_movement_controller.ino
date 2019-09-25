@@ -86,9 +86,9 @@ const bool LR_STEPPER_DIRECTION_REVERSED = true;
 
 //motion constants
 static const float BR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.030000000; //July 2019 Encoder at joint  60:12 gears with 600ppr_quad/2400counts/rev
-static const float SL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.053773585; //July 2019 Encoder at joint 106:38 gears with 600ppr_quad/2400counts/rev
+static const float SL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.0605769231; //Sept 2019 Encoder at joint 104:42 gears with 600ppr_quad/2400counts/rev
 static const float UR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.050000000; //July 2019 Encoder at joint  87:29 gears with 600ppr_quad/2400counts/rev
-static const float EL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.058878505; //July 2019 Encoder at joint 107:42 gears with 600ppr_quad/2400counts/rev
+static const float EL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.0518691589;//Sept 2019 Encoder at joint 107:37 gears with 600ppr_quad/2400counts/rev
 static const float LR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.057142857; //July 2019 Encoder at joint  84:32 gears with 600ppr_quad/2400counts/rev
 //static const float WL_JOINT_DEGREES_PER_ENCODER_COUNT = 0.010141226; //July 2019 Encoder at joint  65:15 gears with 2048ppr_quad/8196counts/rev
 //static const float WR_JOINT_DEGREES_PER_ENCODER_COUNT = 0.010986328; //July 2019 Encoder at joint  64:16 gears with 2048ppr_quad/8196counts/rev
@@ -134,6 +134,9 @@ static volatile unsigned long next_publish_update     = 0L;   //used to time loo
 static const unsigned long    PUBLISH_UPDATE_INTERVAL = 500L; //was 500L before 7/4/19, in milliseconds, 500 is 2Hz, 50 is 20Hz, 10 is 100Hz
 static volatile unsigned long next_rate_update        = 0L;   //used to time loop publish updates
 static const unsigned long    RATE_UPDATE_INTERVAL    = 50000L; //in microseconds, 500000 is 2Hz, 50000 is 20Hz, 100000 is 10Hz
+static const unsigned long    SLOW_RATE_UPDATE_INTERVAL = 500000L; //in microseconds, 500000 is 2Hz, 50000 is 20Hz, 100000 is 10Hz
+static volatile unsigned long update_interval;                //represents either RATE_UPDATE_INTERVAL (normal moves) or SLOW_RATE_UPDATE_INTERVAL (slow or short moves)
+static bool                   slow_movement           = false;//determines whether RATE_UPDATE_INTERVAL or SLOW_RATE_UPDATE_INTERVAL is in use
 static volatile unsigned long time_now;                       //used to store value from millis()
 
 //variables to be published
@@ -802,6 +805,24 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
   long num_rate_updates_to_peak = required_duration_until_peak_in_microseconds / RATE_UPDATE_INTERVAL;
   change_in_microsteps_per_second_each_rate_update = (long) (peak_microsteps_per_second / num_rate_updates_to_peak);
 
+  //decide of movement is normal or slow/short - added 9/25/19
+  if (change_in_microsteps_per_second_each_rate_update > 4) {
+    //this is a normal move
+    update_interval = RATE_UPDATE_INTERVAL;
+    Timer1.setPeriod(update_interval);
+    slow_movement = false;
+  }
+  else {
+    /* this is a slow or short move wherein small values of change_in_microsteps_per_second_each_rate_update 
+     *  will be inaccurate because division of longs will truncate decimal portion. Particularly egregious when
+     *  value is lees than one which truncates to zero. E.g. 0.662 truncates to zero */
+    update_interval = SLOW_RATE_UPDATE_INTERVAL;
+    Timer1.setPeriod(update_interval);    
+    //recalculate for 10x slower updates
+    change_in_microsteps_per_second_each_rate_update = (long) (10 * peak_microsteps_per_second / num_rate_updates_to_peak);
+    slow_movement = true;
+  }
+  
   /* debug messages
   sprintf(miscMsgs1, "peak_microsteps_per_second %ld", peak_microsteps_per_second);
   nh.loginfo(miscMsgs1);
@@ -811,6 +832,9 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
   nh.spinOnce();
   sprintf(miscMsgs3, "change_in_microsteps_per_second_each_rate_update %ld", change_in_microsteps_per_second_each_rate_update);
   nh.loginfo(miscMsgs3);
+  nh.spinOnce();
+  sprintf(miscMsgs1, (slow_movement ? "true" : "false"));
+  nh.loginfo(miscMsgs1);
   nh.spinOnce();
    */
    
