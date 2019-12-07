@@ -27,6 +27,7 @@
 #include <TimerOne.h>
 #include <TimerThree.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Int16.h>
 #include <std_msgs/Float32.h>
 #include <Ramp.h>
 #include <my_robotic_arm/MinionState.h>
@@ -37,7 +38,7 @@
 //#include <Adafruit_Sensor.h>
 
 //states
-enum {UNPOWERED, HOLDING_POSITION, MOVING, FINAL_APPROACH, CW_ENDSTOP_ACTIVATED, CCW_ENDSTOP_ACTIVATED, CALIBRATING } running_state;
+enum {UNPOWERED, HOLDING_POSITION, MOVING, EMERG_STOPPED, LOST_COMM, FINAL_APPROACH, CW_ENDSTOP_ACTIVATED, CCW_ENDSTOP_ACTIVATED, CALIBRATING } running_state;
 enum {GREEN, YELLOW, RED} torque_state;
 
 //states string messages
@@ -144,6 +145,9 @@ static const unsigned long    SLOW_RATE_UPDATE_INTERVAL = 500000L; //in microsec
 static volatile unsigned long update_interval;                //represents either RATE_UPDATE_INTERVAL (normal moves) or SLOW_RATE_UPDATE_INTERVAL (slow or short moves)
 static bool                   slow_movement           = false;//determines whether RATE_UPDATE_INTERVAL or SLOW_RATE_UPDATE_INTERVAL is in use
 static volatile unsigned long time_now;                       //used to store value from millis()
+static const unsigned long    COMM_LOSS_TIMEOUT       = 2000L;//time interval in milliseconds to initiate lost comm shutdown if master is not heard from. 2000L = 2.0 seconds
+static volatile unsigned long comm_loss_time_limit    = 0L;   //time at which to initiate lost comm shutdown
+static volatile int           override_command_received = 0;  //stores override commands issued from master
 
 //variables to be published
 my_robotic_arm::MinionState minion_state;
@@ -461,9 +465,28 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
   nh.loginfo("commanded_incremental_movement=");//this works
   nh.loginfo(result);//this works
 }// end commandedIncrementalMovementCallback()
+void overrideCommandReceivedCallback(const std_msgs::Int16& the_override_command_msg_){
+  override_command_received = the_override_command_msg_.data;
+  
+  //set time limit in which next override must be received in order to forestall lost comm timeout
+  comm_loss_time_limit = millis() + COMM_LOSS_TIMEOUT;
+
+  //handle any commands for non-normal operation
+  if (override_command_received < 0){
+    //negative values of override_command_ indicate a non-normal command has been received from the master
+    switch (override_command_received) {
+      case -999:
+        //emerg stop command has been issued
+        emergencyStop();
+        break;
+    }
+  }
+  
+}// end overrideCommandReceivedCallback()
 
 //subscribers
 ros::Subscriber<std_msgs::String> commanded_incremental_motor_movement_sub("commanded_incremental_motor_movement", commandedIncrementalMotorMovementCallback);
+ros::Subscriber<std_msgs::Int16> override_commands_sub("minion_override_command", overrideCommandReceivedCallback);
 
 //publishers - need to create all possible publishers, but will only advertise ones called for by minion_ident
 ros::Publisher BR_minion_state_pub("BR_minion_state", &minion_state);     //BR minion state
@@ -679,6 +702,8 @@ void stepOnce() {
       pulseStepper();
       steps_remaining--;
       break;
+    case EMERG_STOPPED:
+      break;
     case CW_ENDSTOP_ACTIVATED:
       break;
     case CCW_ENDSTOP_ACTIVATED:
@@ -777,6 +802,10 @@ void updateRate() {
    */
    
 } // end updateRate()
+
+void emergencyStop(){
+  running_state = EMERG_STOPPED;
+}
 
 //NON-BLOCKING VERSION
 void executeIncrementalMovement(float the_required_total_duration_, float the_commanded_incremental_movement_) {
@@ -1089,7 +1118,16 @@ void readSensors() {
   minion_state.motor_position = ((float) stepper_counts) * degrees_per_microstep;
   //minion_state.motor_velocity = //this is populated in executeIncrementalMovement()
   minion_state.motor_acceleration = 0.0099; //this can be added later
-  minion_state.operating_state = 99;  //To do - add this concept
+
+  //populate the operating_state portion of the minion_state
+  if (running_state == MOVING || running_state == HOLDING_POSITION || running_state == FINAL_APPROACH){
+    //parrots back override_command_received if everything is normal
+    minion_state.operating_state = override_command_received;  
+  }
+  else{
+    //reports non-normal state e.g. endstop detected etc.
+    minion_state.operating_state = running_state;
+  }
 
 }//end readSensors()
 
@@ -1278,7 +1316,14 @@ void loop() {
   //log updates periodically
   time_now = millis();
   if (time_now > next_publish_update) {
+    //read sensors
     readSensors();
+    //check for lost comm
+    if (time_now > comm_loss_time_limit){
+      //initiate lost comm procedure
+      emergencyStop();
+    }
+    //publish
     publishAll();
     next_publish_update = time_now + PUBLISH_UPDATE_INTERVAL;
   }//end if next_publish_update
