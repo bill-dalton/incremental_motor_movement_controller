@@ -7,12 +7,21 @@
  *    For Dynamixels on OpenCM, use xl430_incremental_motor_movement_controller
  * Subscribes to ROS Topics:
  *    commanded_incremental_motor_movement
+ *    minion_override_command
  * Publishes to ROS Topics:   
  *    BR_minion_state, SL_minion_state, etc
  * Action:   
  *    Moves motor to goal using RAMP algorithm
- * To Do:
- *    convert running_state and torque_state into an integer concept to publish as int minion_state.operating_state
+ *    Stops motion and motion timers if eother: endstop activated while moving, or lost comm, or estop command from master
+ *    a valid new plan from master will cancel any endstop, lost comm, or emrg stop conditions
+ *    lost comm time updating done in overrideCommandReceivedCallback(), lost comm monitoring done in loop()
+ *    listening for estop command from master done in overrideCommandReceivedCallback()
+ *    endstop monitoring done in stepOnce()
+ * Modifications Dec 2019 to implement minion_state.operating_state concept
+ *    convert operating_state and torque_state into an integer concept to publish as int minion_state.operating_state
+ *    removed states string messages concept Dec 2019. This has been replaced by minion_state.operating_state and operating_state enum
+ * Modifications Dec 2019 to implement minion_override_command concept
+ *    implement allowed_to_move_cw & allowed_to_move_ccw concept
  * Modification to be non-blocking
  *    removed RAMP stuff
  *    added Timer1
@@ -20,6 +29,8 @@
  *    Timer1 - fires to change stepper interval
  *    Timer3 - fires to pulse stepper
  *    millis() - used to periodically publish position and state info
+ * To Do:
+ *    
  */
 
 #include <ros.h>
@@ -38,10 +49,15 @@
 //#include <Adafruit_Sensor.h>
 
 //states
-enum {UNPOWERED, HOLDING_POSITION, MOVING, EMERG_STOPPED, LOST_COMM, FINAL_APPROACH, CW_ENDSTOP_ACTIVATED, CCW_ENDSTOP_ACTIVATED, CALIBRATING } running_state;
-enum {GREEN, YELLOW, RED} torque_state;
+enum {NORMAL=0,
+      EMERG_STOPPED_BY_MASTER=-1,
+      LOST_COMM_FROM_MASTER=-2,
+      POSITIVE_ENDSTOP_ACTIVATED=-3,
+      NEGATIVE_ENDSTOP_ACTIVATED=-4
+      } operating_state;
+//enum {GREEN, YELLOW, RED} torque_state;
 
-//states string messages
+/*//states string messages
 static char states_msg[100];
 static char empty_states_msg[100] = "States: ";
 static char unpowered_msg[] = "unpowered ";
@@ -54,16 +70,20 @@ static char calibrating_msg[] = "calibrating ";
 static char green_torque_msg[] = "green";
 static char yellow_torque_msg[] = "yellow";
 static char red_torque_msg[] = "red";
+*/
 
 //flags
 volatile bool new_plan = false;
+volatile bool allowed_to_move_positive = false;
+volatile bool allowed_to_move_negative = false;
 
 //debug messages
-static char miscMsgs1[50];
+/*static char miscMsgs1[50];
 static char miscMsgs2[50];
 static char miscMsgs3[50];
 static char miscMsgs4[50];
 static char miscMsgs5[50];
+*/
 static char inbound_message[400];
 
 //internal position and direction variables
@@ -120,7 +140,7 @@ static const float LR_DEGREES_PER_MICROSTEP = 0.0134927588;  //16.675:1 gear rat
 static volatile float required_duration;                //required duration in seconds for joint movement
 static volatile float commanded_stepper_position = 0.0; //joint commanded_stepper_position in degrees
 static volatile float commanded_incremental_movement = 0.0; //joint commanded_incremental_movement in degrees
-static volatile bool  direction_CW = true;              //movement in positive joint direction is defined as CW
+static volatile bool  direction_positive = true;              //movement in positive joint direction is defined as CW
 static volatile float current_pos = 0.0;                //joint position in degrees
 static volatile float pos_error = 0.0;                  //difference in degrees between joint commanded_stepper_position and joint current position
 static volatile long  steps_remaining = 0;              //stepper steps remaining to move. uses in final_approach and holding_position
@@ -156,8 +176,8 @@ std_msgs::String state2; //may be in multiple states simultaneously
 //trajectory_msgs::JointTrajectoryPoint jtp;
 
 //endstop pins
-const int CW_ENDSTOP_PIN = 2;  //pin # corrected 12/6/17
-const int CCW_ENDSTOP_PIN = 3; //pin # corrected 12/6/17
+const int POSITIVE_ENDSTOP_PIN = 2;  //pin # corrected 12/6/17
+const int NEGATIVE_ENDSTOP_PIN = 3; //pin # corrected 12/6/17
 
 //encoder pins
 const int ENCODER_1_PIN_A = 20;
@@ -333,6 +353,7 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
     previous_command_number_ = current_command_number_;
     //set flag
     new_plan = true;//new_plan flag is polled in loop() to initiate a new plan and motion
+    operating_state = NORMAL;//a valid new plan will cancel any endstop, lost comm, or emrg stop conditions
   }
   else {
     //this is a duplicate plan, exit
@@ -466,9 +487,10 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
   nh.loginfo(result);//this works
 }// end commandedIncrementalMovementCallback()
 void overrideCommandReceivedCallback(const std_msgs::Int16& the_override_command_msg_){
+  //action taken when message rec'd on rostopic: minion_override_command
   override_command_received = the_override_command_msg_.data;
   
-  //set time limit in which next override must be received in order to forestall lost comm timeout
+  //renew time limit in which next override must be received in order to forestall lost comm timeout
   comm_loss_time_limit = millis() + COMM_LOSS_TIMEOUT;
 
   //handle any commands for non-normal operation
@@ -476,8 +498,11 @@ void overrideCommandReceivedCallback(const std_msgs::Int16& the_override_command
     //negative values of override_command_ indicate a non-normal command has been received from the master
     switch (override_command_received) {
       case -999:
-        //emerg stop command has been issued
-        emergencyStop();
+        //emerg stop command has been issued by master
+        allowed_to_move_positive = false;
+        allowed_to_move_negative = false;
+        operating_state = EMERG_STOPPED_BY_MASTER;
+        movement_end_time = millis();//this will stop movement clock
         break;
     }
   }
@@ -645,7 +670,7 @@ void pulseStepper() {
   digitalWrite(STEP_PIN, LOW);
   digitalWrite(STEP2_PIN, LOW);
   //    delayMicroseconds(5);  //increase this if pulses too fast for accurate step or jitters
-  if (direction_CW) {
+  if (direction_positive) {
     stepper_counts++;
   }
   else {
@@ -661,35 +686,55 @@ void stepOnce() {
   //  nh.spinOnce();
 
   //check for endstop activation - note endstop pins are set as INPUT_PULLUP so a LOW means switch has been activated
-  if (digitalRead(CW_ENDSTOP_PIN) == LOW) {
-    if (direction_CW) {
-      nh.loginfo("CW endstop + dir CW, stop!");
+  if (digitalRead(POSITIVE_ENDSTOP_PIN) == LOW) {
+    if (direction_positive) {
+      nh.loginfo("Positive endstop + dir positive, stop!");
       //WORKING HERE 12/6/17
-      //NEED TO CHECK DIRECTIONS ARE CORRECT
-      //NEED TO UNCOMMENT NEXT LINE
-      running_state = CW_ENDSTOP_ACTIVATED;
+      //To Do - NEED TO CHECK DIRECTIONS ARE CORRECT
+      operating_state = POSITIVE_ENDSTOP_ACTIVATED;
+      allowed_to_move_positive = false;
+      allowed_to_move_negative = true;
+      movement_end_time = millis();//this will stop movement clock
       return; //exits stepOnce() if endstop has been activated in this direction
     }
     else {
-      nh.loginfo("CW endstop + dir CCW");
-      running_state = CW_ENDSTOP_ACTIVATED;
+      //this else case should never happen if endstops are wired correctly
+      nh.loginfo("Positive endstop + dir Negative");
+      operating_state = POSITIVE_ENDSTOP_ACTIVATED;
+      allowed_to_move_positive = false;
+      allowed_to_move_negative = true;
+      movement_end_time = millis();//this will stop movement clock
       return; //exits stepOnce() if endstop has been activated in this direction
     }
   }
-  if (digitalRead(CCW_ENDSTOP_PIN) == LOW) {
-    if (!direction_CW) {
-      nh.loginfo("CCW endstop + dir CCW, stop!");
-      running_state = CCW_ENDSTOP_ACTIVATED;
+  if (digitalRead(NEGATIVE_ENDSTOP_PIN) == LOW) {
+    if (!direction_positive) {
+      nh.loginfo("Negative endstop + dir Negative, stop!");
+      operating_state = NEGATIVE_ENDSTOP_ACTIVATED;
+      allowed_to_move_positive = true;
+      allowed_to_move_negative = false;
+      movement_end_time = millis();//this will stop movement clock
       return; //exits stepOnce() if endstop has been activated in this direction
     }
     else {
-      nh.loginfo("CCW endstop + dir CW");
-      running_state = CCW_ENDSTOP_ACTIVATED;
+      //this else case should never happen if endstops are wired correctly
+      nh.loginfo("Negative endstop + dir Positive");
+      operating_state = NEGATIVE_ENDSTOP_ACTIVATED;
+      allowed_to_move_positive = true;
+      allowed_to_move_negative = false;
+      movement_end_time = millis();//this will stop movement clock
       return; //exits stepOnce() if endstop has been activated in this direction
     }
   }
 
-  switch (running_state) {
+  //pulse stepper if normal operation
+  if (operating_state == NORMAL){
+      //step and decrement
+      pulseStepper();
+      steps_remaining--;
+  }
+
+  /*switch (operating_state) {
     case UNPOWERED:
       //      nh.loginfo("UNP");
       break;
@@ -712,7 +757,8 @@ void stepOnce() {
       break;
     default:
       break;
-  }//end switch running_state
+  }//end switch operating_state
+  */
 }// end stepOnce()
 
 long getPeakStepperVelocityNeeded(float the_required_total_duration_, float the_commanded_incremental_movement_){
@@ -803,10 +849,6 @@ void updateRate() {
    
 } // end updateRate()
 
-void emergencyStop(){
-  running_state = EMERG_STOPPED;
-}
-
 //NON-BLOCKING VERSION
 void executeIncrementalMovement(float the_required_total_duration_, float the_commanded_incremental_movement_) {
   /* Result: pulses stepper a precise number of times to acheive commanded degrees of movement at joint
@@ -880,7 +922,7 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
    
   //get direction of motion. positive distance defined as CCW, negative as CW
   if (the_commanded_incremental_movement_ > 0) {
-      direction_CW = true;
+      direction_positive = true;
 //      nh.loginfo("in executeIncrementalMovement(), dir is CW");
 //      nh.spinOnce();
       if (stepper_direction_reversed == true){
@@ -894,7 +936,7 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
       }
   } 
   else {
-      direction_CW = false;
+      direction_positive = false;
 //      nh.loginfo("in executeIncrementalMovement(), dir is CCW");
 //      nh.spinOnce();
       if (stepper_direction_reversed == true){
@@ -962,7 +1004,7 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
 
   //get direction of motion. positive distance defined as CCW, negative as CW
   if (the_commanded_incremental_movement_ > 0) {
-      direction_CW = true;
+      direction_positive = true;
 //      nh.loginfo("in executeIncrementalMovement(), dir is CW");
 //      nh.spinOnce();
       if (stepper_direction_reversed == true){
@@ -976,7 +1018,7 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
       }
   } 
   else {
-      direction_CW = false;
+      direction_positive = false;
 //      nh.loginfo("in executeIncrementalMovement(), dir is CCW");
 //      nh.spinOnce();
       if (stepper_direction_reversed == true){
@@ -1065,18 +1107,19 @@ void executeIncrementalMovement(float the_required_total_duration_, float the_co
 */
 
 void readSensors() {
-  //report state
+  /*//report state as a char message - not used since Dec 2019
   strcpy(states_msg, empty_states_msg);      //overwrites previous states_msg with empty msg
-  if (running_state == UNPOWERED) strcat(states_msg, unpowered_msg);
-  if (running_state == HOLDING_POSITION) strcat(states_msg, holding_position_msg);
-  if (running_state == MOVING) strcat(states_msg, moving_msg);
-  if (running_state == FINAL_APPROACH) strcat(states_msg, final_approach_msg);
-  if (running_state == CW_ENDSTOP_ACTIVATED) strcat(states_msg, cw_endstop_activated_msg);
-  if (running_state == CCW_ENDSTOP_ACTIVATED) strcat(states_msg, ccw_endstop_activated_msg);
-  if (running_state == CALIBRATING) strcat(states_msg, calibrating_msg);
+  if (operating_state == UNPOWERED) strcat(states_msg, unpowered_msg);
+  if (operating_state == HOLDING_POSITION) strcat(states_msg, holding_position_msg);
+  if (operating_state == MOVING) strcat(states_msg, moving_msg);
+  if (operating_state == FINAL_APPROACH) strcat(states_msg, final_approach_msg);
+  if (operating_state == CW_ENDSTOP_ACTIVATED) strcat(states_msg, cw_endstop_activated_msg);
+  if (operating_state == CCW_ENDSTOP_ACTIVATED) strcat(states_msg, ccw_endstop_activated_msg);
+  if (operating_state == CALIBRATING) strcat(states_msg, calibrating_msg);
   if (torque_state == GREEN) strcat(states_msg, green_torque_msg);
   if (torque_state == YELLOW) strcat(states_msg, yellow_torque_msg);
   if (torque_state == RED) strcat(states_msg, red_torque_msg);
+  */
 
   //populate MinionState message
   if (minion_ident == LR_IDENT){
@@ -1120,22 +1163,22 @@ void readSensors() {
   minion_state.motor_acceleration = 0.0099; //this can be added later
 
   //populate the operating_state portion of the minion_state
-  if (running_state == MOVING || running_state == HOLDING_POSITION || running_state == FINAL_APPROACH){
+  if (operating_state == NORMAL){
     //parrots back override_command_received if everything is normal
     minion_state.operating_state = override_command_received;  
   }
   else{
     //reports non-normal state e.g. endstop detected etc.
-    minion_state.operating_state = running_state;
+    minion_state.operating_state = operating_state;
   }
-
 }//end readSensors()
 
 void publishAll() {
   //publish stuff for this joint
 
-  //populate data
+  /*//populate data
   state.data = states_msg;
+  */
 
   //publish minion-appropriate data
   switch (minion_ident) {
@@ -1182,8 +1225,8 @@ void setup() {
   pinMode(ENCODER_2_PIN_B, INPUT_PULLUP);
 
   //init endstop pins
-  pinMode(CW_ENDSTOP_PIN, INPUT_PULLUP);
-  pinMode(CCW_ENDSTOP_PIN, INPUT_PULLUP);
+  pinMode(POSITIVE_ENDSTOP_PIN, INPUT_PULLUP);
+  pinMode(NEGATIVE_ENDSTOP_PIN, INPUT_PULLUP);
 
   //init digital encoder interrupts
   attachInterrupt(digitalPinToInterrupt(ENCODER_1_PIN_A), doEncoder1A, CHANGE);
@@ -1306,11 +1349,19 @@ void loop() {
     nh.loginfo("entering if new_plan 0");
     nh.spinOnce();
       
-    running_state = MOVING;
+    //enable movment
+    if (direction_positive){
+      allowed_to_move_positive = true;
+      allowed_to_move_negative = false;
+    }
+    else{
+      allowed_to_move_positive = false;
+      allowed_to_move_negative = true;
+    }
+    //operating_state = MOVING; //this is deprecated as of Dec 2019
 
     executeIncrementalMovement(required_duration, commanded_incremental_movement);
     new_plan = false;
-    
   }//end if new_plan
 
   //log updates periodically
@@ -1321,7 +1372,10 @@ void loop() {
     //check for lost comm
     if (time_now > comm_loss_time_limit){
       //initiate lost comm procedure
-      emergencyStop();
+      allowed_to_move_positive = false;
+      allowed_to_move_negative = false;
+      operating_state = LOST_COMM_FROM_MASTER;
+      movement_end_time = millis();//this will stop movement clock
     }
     //publish
     publishAll();
@@ -1329,14 +1383,13 @@ void loop() {
   }//end if next_publish_update
 
   //shutdown movement when time is up
-  if (running_state == MOVING) {
-    if (time_now > movement_end_time) {
-      //movement should be finished. stop stepper motions and Timers
-      Timer1.stop();
-      Timer3.stop();
-      running_state = HOLDING_POSITION;
-    }  
-  }
+  if (time_now > movement_end_time) {
+    //movement should be finished. stop stepper motions and Timers
+    Timer1.stop();
+    Timer3.stop();
+    allowed_to_move_positive = false;
+    allowed_to_move_negative = false;
+  }  
 
   nh.spinOnce();
 }// end loop()
