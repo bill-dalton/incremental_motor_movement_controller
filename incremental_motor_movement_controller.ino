@@ -351,7 +351,7 @@ void commandedIncrementalMotorMovementCallback(const std_msgs::String& the_comma
     //this is a new command. Plan and execute motion
     //set previous commanded position
     previous_command_number_ = current_command_number_;
-    //set flag
+    //set flags
     new_plan = true;//new_plan flag is polled in loop() to initiate a new plan and motion
     operating_state = NORMAL;//a valid new plan will cancel any endstop, lost comm, or emrg stop conditions
   }
@@ -1165,7 +1165,13 @@ void readSensors() {
   //populate the operating_state portion of the minion_state
   if (operating_state == NORMAL){
     //parrots back override_command_received if everything is normal
-    minion_state.operating_state = override_command_received;  
+    //add if to prevent timing glitch
+    if(override_command_received == -999){
+      minion_state.operating_state = EMERG_STOPPED_BY_MASTER;
+    }
+    else{
+      minion_state.operating_state = override_command_received; 
+    }
   }
   else{
     //reports non-normal state e.g. endstop detected etc.
