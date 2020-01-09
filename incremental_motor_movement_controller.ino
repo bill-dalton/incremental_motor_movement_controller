@@ -140,7 +140,7 @@ static const float LR_DEGREES_PER_MICROSTEP = 0.0134927588;  //16.675:1 gear rat
 static volatile float required_duration;                //required duration in seconds for joint movement
 static volatile float commanded_stepper_position = 0.0; //joint commanded_stepper_position in degrees
 static volatile float commanded_incremental_movement = 0.0; //joint commanded_incremental_movement in degrees
-static volatile bool  direction_positive = true;              //movement in positive joint direction is defined as CW
+static volatile bool  direction_positive = true;        //movement in positive joint direction is defined as CW
 static volatile float current_pos = 0.0;                //joint position in degrees
 static volatile float pos_error = 0.0;                  //difference in degrees between joint commanded_stepper_position and joint current position
 static volatile long  steps_remaining = 0;              //stepper steps remaining to move. uses in final_approach and holding_position
@@ -148,17 +148,26 @@ static volatile long  steps_to_move = 0;                //for non-blocking motio
 static volatile float joint_degrees_per_encoder_count;  //reset to particular joint in setup()
 static volatile float SE_degrees_per_encoder_count;     //reset to particular joint in setup()
 static volatile float degrees_per_microstep;            //reset to particular joint in setup()
-static volatile long  peak_microsteps_per_second=0L;       //for non-blocking motion algorithm
+static volatile long  peak_microsteps_per_second=0L;    //for non-blocking motion algorithm
 static volatile long  current_microsteps_per_second=0L; //for non-blocking motion algorithm
 static volatile long  change_in_microsteps_per_second_each_rate_update=0L;  //change occuring in one RATE_UPDATE_INTERVAL
 static volatile long  current_microstep_period=0L;      //in microseconds, for non-blocking motion algorithm
 static volatile unsigned long required_duration_until_peak_in_microseconds = 0L;//in milliseconds, for non-blocking motion algorithm
-static volatile unsigned long movement_start_time;       //from millis() for non-blocking motion algorithm
-static volatile unsigned long movement_end_time;         //from millis() for non-blocking motion algorithm. used to assure movement stops
+static volatile unsigned long movement_start_time;      //from millis() for non-blocking motion algorithm
+static volatile unsigned long movement_end_time;        //from millis() for non-blocking motion algorithm. used to assure movement stops
+static volatile float joint_velocity;                   //deg/sec     
+static volatile float joint_acceleration;               //deg/sec/sec
+static volatile float motor_velocity;                   //deg/sec
+static volatile float motor_acceleration;               //deg/sec/sec
+static volatile float previous_joint_position;          //degrees
+static volatile float previous_joint_velocity;          //deg/sec
+static volatile float previous_motor_position;          //degrees
+static volatile float previous_motor_velocity;          //deg/sec
 
 //loop timing variables
 static volatile unsigned long next_publish_update     = 0L;   //used to time loop publish updates
 static const unsigned long    PUBLISH_UPDATE_INTERVAL = 200L; //was 500L before 1/4/2020, in milliseconds, 200 is 5Hz, 500 is 2Hz, 50 is 20Hz, 10 is 100Hz
+static const float            PUBLISH_UPDATE_INTERVAL_IN_SECONDS = (float) 1000.0 / PUBLISH_UPDATE_INTERVAL;
 static volatile unsigned long next_rate_update        = 0L;   //used to time loop publish updates
 static const unsigned long    RATE_UPDATE_INTERVAL    = 50000L; //in microseconds, 500000 is 2Hz, 50000 is 20Hz, 100000 is 10Hz
 static const unsigned long    SLOW_RATE_UPDATE_INTERVAL = 500000L; //in microseconds, 500000 is 2Hz, 50000 is 20Hz, 100000 is 10Hz
@@ -1121,7 +1130,7 @@ void readSensors() {
   if (torque_state == RED) strcat(states_msg, red_torque_msg);
   */
 
-  //populate MinionState message
+  //calculate the minion_state.joint_position
   if (minion_ident == LR_IDENT){
     //special case 19July19 for 3d accelerometer still wired to pins 20&21 I2C. LR has no SE encoder installed.
     if (encoder_direction_reversed == true) {
@@ -1158,10 +1167,21 @@ void readSensors() {
     }
   }
 
-  minion_state.motor_position = ((float) stepper_counts) * degrees_per_microstep;
-  //minion_state.motor_velocity = //this is populated in executeIncrementalMovement()
-  minion_state.motor_acceleration = 0.0099; //this can be added later
+  //calculate the minion_state.motor_position
+  minion_state.motor_position = ((float) stepper_counts) * degrees_per_microstep;  
 
+  //calculate the velocities and accelerations
+  minion_state.joint_velocity     = (minion_state.joint_position - previous_joint_position) / PUBLISH_UPDATE_INTERVAL_IN_SECONDS;
+  minion_state.joint_acceleration = (minion_state.joint_velocity - previous_joint_velocity) / PUBLISH_UPDATE_INTERVAL_IN_SECONDS;
+  minion_state.motor_velocity     = (minion_state.motor_position - previous_motor_position) / PUBLISH_UPDATE_INTERVAL_IN_SECONDS;
+  minion_state.motor_acceleration = (minion_state.motor_velocity - previous_motor_velocity) / PUBLISH_UPDATE_INTERVAL_IN_SECONDS;
+
+  //store the previous values for the next round
+  previous_joint_position = minion_state.joint_position;
+  previous_joint_velocity = minion_state.joint_velocity;
+  previous_motor_position = minion_state.motor_position;
+  previous_motor_velocity = minion_state.motor_velocity;
+  
   //populate the operating_state portion of the minion_state
   if (operating_state == NORMAL){
     //parrots back override_command_received if everything is normal
