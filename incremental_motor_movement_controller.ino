@@ -167,7 +167,7 @@ static volatile float previous_motor_velocity;          //deg/sec
 //loop timing variables
 static volatile unsigned long next_publish_update     = 0L;   //used to time loop publish updates
 static const unsigned long    PUBLISH_UPDATE_INTERVAL = 200L; //was 500L before 1/4/2020, in milliseconds, 200 is 5Hz, 500 is 2Hz, 50 is 20Hz, 10 is 100Hz
-static const float            PUBLISH_UPDATE_INTERVAL_IN_SECONDS = (float) 1000.0 / PUBLISH_UPDATE_INTERVAL;
+static const float            PUBLISH_UPDATE_INTERVAL_IN_SECONDS = (float) PUBLISH_UPDATE_INTERVAL / 1000.0;
 static volatile unsigned long next_rate_update        = 0L;   //used to time loop publish updates
 static const unsigned long    RATE_UPDATE_INTERVAL    = 50000L; //in microseconds, 500000 is 2Hz, 50000 is 20Hz, 100000 is 10Hz
 static const unsigned long    SLOW_RATE_UPDATE_INTERVAL = 500000L; //in microseconds, 500000 is 2Hz, 50000 is 20Hz, 100000 is 10Hz
