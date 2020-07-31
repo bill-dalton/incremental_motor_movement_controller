@@ -1271,9 +1271,9 @@ void setup() {
   digitalWrite(ENABLE_PIN, LOW);
 
   //setup publishers and subscribers
-  //  nh.getHardware()->setBaud(230400);  //baud rate for this rosserail_arduino node must match rate for rosserial_python node running in terminal window on laptop
+  nh.getHardware()->setBaud(230400);  //baud rate for this rosserail_arduino node must match rate for rosserial_python node running in terminal window on laptop
 //  nh.getHardware()->setBaud(115200);//06Jan2018 lowered to 115200 for compatiblity with simultaneous running of Arduino Due //baud rate for this rosserail_arduino node must match rate for rosserial_python node running in terminal window on laptop
-  nh.getHardware()->setBaud(57600);  //reset to this 1/22/19 for sevon-minio comaptibility - baud rate for this rosserail_arduino node must match rate for rosserial_python node running in terminal window on laptop
+//  nh.getHardware()->setBaud(57600);  //reset to this 1/22/19 for sevon-minio comaptibility - baud rate for this rosserail_arduino node must match rate for rosserial_python node running in terminal window on laptop
   //    nh.getHardware()->setBaud(9600);  //baud rate for this rosserail_arduino node must match rate for rosserial_python node running in terminal window on laptop
   nh.initNode();
   nh.subscribe(commanded_incremental_motor_movement_sub);
